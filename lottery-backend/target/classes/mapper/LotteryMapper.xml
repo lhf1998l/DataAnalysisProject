@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.lottery.mapper.LotteryMapper">
+    <insert id="insertOrUpdate">
+        INSERT INTO lottery_record (
+            issue_no, ball_1, ball_2, ball_3, ball_4, ball_5,
+            ball_6, ball_7, ball_8, ball_9, ball_10, raw_numbers,
+            create_time, update_time
+        ) VALUES (
+            #{record.issueNo},
+            #{record.ball1}, #{record.ball2}, #{record.ball3},
+            #{record.ball4}, #{record.ball5}, #{record.ball6},
+            #{record.ball7}, #{record.ball8}, #{record.ball9},
+            #{record.ball10}, #{record.rawNumbers},
+            NOW(), NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            ball_1 = VALUES(ball_1),
+            ball_2 = VALUES(ball_2),
+            ball_3 = VALUES(ball_3),
+            ball_4 = VALUES(ball_4),
+            ball_5 = VALUES(ball_5),
+            ball_6 = VALUES(ball_6),
+            ball_7 = VALUES(ball_7),
+            ball_8 = VALUES(ball_8),
+            ball_9 = VALUES(ball_9),
+            ball_10 = VALUES(ball_10),
+            raw_numbers = VALUES(raw_numbers),
+            update_time = NOW()
+    </insert>
+</mapper>

@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node:*)",
+      "Bash(mvn spring-boot:run)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(java -version)",
+      "Bash(mvn -version)",
+      "Bash(rm:*)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //F //PID 9228)",
+      "Bash(taskkill //F //PID 35008)",
+      "Bash(taskkill //F //PID 34148)",
+      "Bash(mvn compile:*)",
+      "Bash(taskkill //F //PID 13420)",
+      "Bash(taskkill //F //PID 30396)",
+      "Bash(mvn clean:*)",
+      "Bash(jps:*)",
+      "Bash(kill 41604)",
+      "Bash(xargs -r taskkill /F /PID)"
+    ]
+  }
+}

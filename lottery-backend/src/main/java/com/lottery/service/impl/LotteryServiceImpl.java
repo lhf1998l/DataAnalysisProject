@@ -330,12 +330,15 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
 
     @Override
     public PageResultDTO<DynamicAnalysisRecord> listDynamicAnalysisRecords(
-            int pageNum, int pageSize, String sourceDate, String dynamicRule, Integer rankNo, String sortOrder) {
+            int pageNum, int pageSize, String sourceDate, String issueNo, String dynamicRule, Integer rankNo, String sortOrder) {
         Page<DynamicAnalysisRecord> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<DynamicAnalysisRecord> wrapper = Wrappers.lambdaQuery();
 
         if (sourceDate != null && !sourceDate.trim().isEmpty()) {
             wrapper.eq(DynamicAnalysisRecord::getSourceDate, resolveIssueDatePrefix(sourceDate));
+        }
+        if (issueNo != null && !issueNo.trim().isEmpty()) {
+            wrapper.like(DynamicAnalysisRecord::getIssueNos, normalizeHistoryIssueNo(issueNo, sourceDate));
         }
         if (dynamicRule != null && !dynamicRule.trim().isEmpty()) {
             wrapper.like(DynamicAnalysisRecord::getDynamicRule, dynamicRule.trim());
@@ -748,6 +751,27 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
         }
 
         return resolveIssueDatePrefix(queryDate) + trimmed;
+    }
+
+    private String normalizeHistoryIssueNo(String issueNo, String sourceDate) {
+        if (issueNo == null || issueNo.trim().isEmpty()) {
+            return null;
+        }
+
+        String trimmed = issueNo.trim();
+        if (!trimmed.matches("\\d+")) {
+            throw new IllegalArgumentException("issueNo must be numeric");
+        }
+
+        if (trimmed.length() >= 8) {
+            return trimmed;
+        }
+
+        if (sourceDate == null || sourceDate.trim().isEmpty()) {
+            return trimmed;
+        }
+
+        return resolveIssueDatePrefix(sourceDate) + trimmed;
     }
 
     /**

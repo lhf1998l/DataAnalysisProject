@@ -401,6 +401,12 @@
               <el-card shadow="hover" class="placeholder-card">
                 <template #header>
                   <div class="card-header">
+                    <div class="header-actions">
+                      <el-radio-group v-model="showDynamicPseudoHits" size="small">
+                        <el-radio-button :label="true">显示伪命中</el-radio-button>
+                        <el-radio-button :label="false">隐藏伪命中</el-radio-button>
+                      </el-radio-group>
+                    </div>
                     <span>导入规则列表</span>
                   </div>
                 </template>
@@ -462,6 +468,15 @@
                       clearable
                       size="small"
                     />
+                    <span class="label">期号：</span>
+                    <el-input
+                      v-model.trim="historyFilters.issueNo"
+                      placeholder="输入期号"
+                      clearable
+                      size="small"
+                      style="width: 180px"
+                      @keyup.enter="loadHistoryRecords(true)"
+                    />
                     <span class="label">规则：</span>
                     <el-input
                       v-model.trim="historyFilters.dynamicRule"
@@ -494,7 +509,13 @@
                 </template>
 
                 <div class="table-scroll">
-                <el-table :data="historyTableData" border stripe v-loading="historyLoading" style="width: 100%" @sort-change="handleHistorySortChange">
+                <div class="table-toolbar">
+                  <el-radio-group v-model="showHistoryPseudoHits" size="small">
+                    <el-radio-button :label="true">显示伪命中</el-radio-button>
+                    <el-radio-button :label="false">隐藏伪命中</el-radio-button>
+                  </el-radio-group>
+                </div>
+                <el-table :data="displayedHistoryTableData" border stripe v-loading="historyLoading" style="width: 100%" @sort-change="handleHistorySortChange">
                   <el-table-column prop="sourceDate" label="数据来源日期" width="140" align="center" />
                   <el-table-column prop="rankNo" label="名次" width="100" align="center">
                     <template #default="{ row }">第{{ row.rankNo }}名</template>
@@ -503,8 +524,8 @@
                   <el-table-column prop="totalMissCount" label="连续超过6次未命中的次数" width="220" align="center" sortable="custom" />
                   <el-table-column label="期号" min-width="320">
                     <template #default="{ row }">
-                      <div v-if="buildIssuePairs(row.issueNos, row.actualIssueNos).length" class="issue-list">
-                        <template v-for="pair in buildIssuePairs(row.issueNos, row.actualIssueNos)" :key="`${row.id}-${pair.displayIssueNo}-${pair.actualIssueNo}`">
+                      <div v-if="row.displayedIssuePairs.length" class="issue-list">
+                        <template v-for="pair in row.displayedIssuePairs" :key="`${row.id}-${pair.displayIssueNo}-${pair.actualIssueNo}`">
                           <el-tooltip
                             v-if="pair.pseudoHit"
                             :content="`实际起始期号：${pair.actualIssueNo}`"
@@ -610,6 +631,12 @@
                 </el-row>
 
                 <el-collapse class="compare-collapse">
+                  <div class="table-toolbar">
+                    <el-radio-group v-model="showComparePseudoHits" size="small">
+                      <el-radio-button :label="true">显示伪命中</el-radio-button>
+                      <el-radio-button :label="false">隐藏伪命中</el-radio-button>
+                    </el-radio-group>
+                  </div>
                   <el-collapse-item
                     v-for="ruleCompare in displayedRuleCompares"
                     :key="ruleCompare.dynamicRule"
@@ -622,9 +649,9 @@
                       <el-table-column prop="totalMissCount" label="连续超过6次未命中的次数" width="220" align="center" />
                       <el-table-column label="期号" min-width="320">
                         <template #default="{ row }">
-                          <div v-if="buildIssuePairs(row.issueNos, row.actualIssueNos).length" class="issue-list">
+                          <div v-if="row.displayedIssuePairs.length" class="issue-list">
                             <template
-                              v-for="pair in buildIssuePairs(row.issueNos, row.actualIssueNos)"
+                              v-for="pair in row.displayedIssuePairs"
                               :key="`${ruleCompare.dynamicRule}-${row.sourceDate}-${pair.displayIssueNo}-${pair.actualIssueNo}`"
                             >
                               <el-tooltip
@@ -711,9 +738,11 @@ const dynamicRules = ref([])
 const dynamicAnalyzeSummary = ref(null)
 const dynamicSortOrder = ref('')
 const dynamicRuleKeyword = ref('')
+const showDynamicPseudoHits = ref(true)
 
 const historyFilters = ref({
   sourceDate: '',
+  issueNo: '',
   dynamicRule: '',
   rankNo: null,
 })
@@ -721,6 +750,7 @@ const historyTableData = ref([])
 const historyLoading = ref(false)
 const historyPagination = ref({ page: 1, size: 20, total: 0 })
 const historySortOrder = ref('')
+const showHistoryPseudoHits = ref(true)
 
 const compareFilters = ref({
   sourceDates: [],
@@ -730,6 +760,7 @@ const compareFilters = ref({
 const compareLoading = ref(false)
 const historyCompareResult = ref(null)
 const compareSortOrder = ref('')
+const showComparePseudoHits = ref(true)
 
 const ruleContentMap = {
   1: '小大大小小小大大小小',
@@ -744,8 +775,7 @@ const displayedAnalyzeRules = computed(() => {
   }
 
   return analyzeResult.value.rules.map((rule) => {
-    const sourceEvents = rule.missEvents || []
-    const missEvents = showPseudoHits.value ? sourceEvents : sourceEvents.filter((event) => !event.pseudoHit)
+    const missEvents = filterPseudoMissEvents(rule.missEvents, showPseudoHits.value)
 
     return {
       ...rule,
@@ -764,7 +794,17 @@ const updatedRuleContentMap = {
 
 const displayedDynamicRules = computed(() => {
   const keyword = dynamicRuleKeyword.value.trim()
-  const rules = dynamicRules.value.filter((rule) => !keyword || (rule.importedRule || '').includes(keyword))
+  const rules = dynamicRules.value
+    .filter((rule) => !keyword || (rule.importedRule || '').includes(keyword))
+    .map((rule) => {
+      const missEvents = filterPseudoMissEvents(rule.missEvents, showDynamicPseudoHits.value)
+
+      return {
+        ...rule,
+        totalMissCount: missEvents.length,
+        missEvents,
+      }
+    })
 
   if (dynamicSortOrder.value === 'ascending') {
     rules.sort((a, b) => (a.totalMissCount ?? 0) - (b.totalMissCount ?? 0))
@@ -775,8 +815,36 @@ const displayedDynamicRules = computed(() => {
   return rules
 })
 
+const displayedHistoryTableData = computed(() =>
+  historyTableData.value.map((row) => {
+    const displayedIssuePairs = filterIssuePairs(row.issueNos, row.actualIssueNos, showHistoryPseudoHits.value)
+
+    return {
+      ...row,
+      totalMissCount: displayedIssuePairs.length,
+      displayedIssuePairs,
+    }
+  })
+)
+
 const displayedRuleCompares = computed(() => {
-  const ruleCompares = [...(historyCompareResult.value?.ruleCompares || [])]
+  const ruleCompares = (historyCompareResult.value?.ruleCompares || []).map((ruleCompare) => {
+    const items = (ruleCompare.items || []).map((item) => {
+      const displayedIssuePairs = filterIssuePairs(item.issueNos, item.actualIssueNos, showComparePseudoHits.value)
+
+      return {
+        ...item,
+        totalMissCount: displayedIssuePairs.length,
+        displayedIssuePairs,
+      }
+    })
+
+    return {
+      ...ruleCompare,
+      totalMissCountSum: items.reduce((sum, item) => sum + (item.totalMissCount ?? 0), 0),
+      items,
+    }
+  })
 
   if (compareSortOrder.value === 'ascending') {
     ruleCompares.sort((a, b) => (a.totalMissCountSum ?? 0) - (b.totalMissCountSum ?? 0))
@@ -819,7 +887,7 @@ const handleHistorySortChange = ({ prop, order }) => {
 }
 
 const resetHistoryFilters = () => {
-  historyFilters.value = { sourceDate: '', dynamicRule: '', rankNo: null }
+  historyFilters.value = { sourceDate: '', issueNo: '', dynamicRule: '', rankNo: null }
   historySortOrder.value = ''
   loadHistoryRecords(true)
 }
@@ -856,6 +924,11 @@ watch(showAddDialog, (visible) => {
 })
 
 const getRuleContent = (ruleNo) => updatedRuleContentMap[ruleNo] || ruleContentMap[ruleNo] || '-'
+
+const filterPseudoMissEvents = (missEvents, showPseudo) => {
+  const sourceEvents = missEvents || []
+  return showPseudo ? sourceEvents : sourceEvents.filter((event) => !event.pseudoHit)
+}
 
 // 触发固定规则分析，并同步刷新分析面板。
 const startAnalyze = async () => {
@@ -1037,12 +1110,14 @@ const analyzeDynamicRules = async () => {
         dynamicAnalyzeSummary.value = null
         dynamicRules.value = dynamicRules.value.map((item) => ({ ...item, totalMissCount: 0, missEvents: [] }))
         dynamicSortOrder.value = ''
+        showDynamicPseudoHits.value = true
         ElMessage.warning(`未找到 ${searchDate.value} 的符合条件数据`)
         return
       }
       dynamicAnalyzeSummary.value = result
       dynamicRules.value = result.rules || []
       dynamicSortOrder.value = ''
+      showDynamicPseudoHits.value = true
       ElMessage.success('规则分析完成')
     } else {
       ElMessage.error(resp.data.message || '规则分析失败')
@@ -1131,6 +1206,7 @@ const loadHistoryRecords = async (resetPage = false) => {
         page: historyPagination.value.page,
         size: historyPagination.value.size,
         sourceDate: historyFilters.value.sourceDate || undefined,
+        issueNo: historyFilters.value.issueNo || undefined,
         dynamicRule: historyFilters.value.dynamicRule || undefined,
         rankNo: historyFilters.value.rankNo || undefined,
         sortOrder: historySortOrder.value || undefined,
@@ -1141,6 +1217,7 @@ const loadHistoryRecords = async (resetPage = false) => {
       historyPagination.value.total = resp.data.data.total
       historyPagination.value.page = resp.data.data.current
       historyPagination.value.size = resp.data.data.size
+      showHistoryPseudoHits.value = true
     } else {
       ElMessage.error(resp.data.message || '历史记录加载失败')
     }
@@ -1172,6 +1249,7 @@ const compareHistoryRecords = async () => {
     if (resp.data.code === 200) {
       historyCompareResult.value = resp.data.data
       compareSortOrder.value = ''
+      showComparePseudoHits.value = true
       if (!historyCompareResult.value?.ruleCompares?.length) {
         ElMessage.warning('未找到符合条件的比较记录')
       }
@@ -1285,6 +1363,11 @@ const buildIssuePairs = (issueNos, actualIssueNos) => {
       pseudoHit: displayIssueNo !== actualIssueNo,
     }
   })
+}
+
+const filterIssuePairs = (issueNos, actualIssueNos, showPseudo) => {
+  const pairs = buildIssuePairs(issueNos, actualIssueNos)
+  return showPseudo ? pairs : pairs.filter((pair) => !pair.pseudoHit)
 }
 
 // 页面初始化时预加载基础数据，保证四个页面首屏即可操作。
@@ -1457,6 +1540,12 @@ onBeforeUnmount(() => {
   gap: 12px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.table-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
 }
 
 .pagination-area {

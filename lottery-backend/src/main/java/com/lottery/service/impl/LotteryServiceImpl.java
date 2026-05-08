@@ -336,12 +336,15 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
 
         if (sourceDate != null && !sourceDate.trim().isEmpty()) {
             wrapper.eq(DynamicAnalysisRecord::getSourceDate, resolveIssueDatePrefix(sourceDate));
+        } else {
+            wrapper.ge(DynamicAnalysisRecord::getSourceDate, resolveRecentHistoryStartDate());
         }
         if (issueNo != null && !issueNo.trim().isEmpty()) {
-            wrapper.like(DynamicAnalysisRecord::getIssueNos, normalizeHistoryIssueNo(issueNo, sourceDate));
+            List<String> normalizedIssueNos = normalizeHistoryIssueNos(issueNo, sourceDate);
+            wrapper.and(query -> applyIssueNoFilters(query, normalizedIssueNos));
         }
         if (dynamicRule != null && !dynamicRule.trim().isEmpty()) {
-            wrapper.like(DynamicAnalysisRecord::getDynamicRule, dynamicRule.trim());
+            wrapper.likeRight(DynamicAnalysisRecord::getDynamicRule, dynamicRule.trim());
         }
         if (rankNo != null) {
             if (rankNo < 1 || rankNo > 10) {
@@ -371,6 +374,43 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int normalizeDynamicAnalysisIssueNos() {
+        List<DynamicAnalysisRecord> records = dynamicAnalysisRecordMapper.selectList(Wrappers.lambdaQuery());
+        int updatedCount = 0;
+
+        for (DynamicAnalysisRecord record : records) {
+            String normalizedIssueNos = normalizeStoredIssueNos(record.getIssueNos());
+            String normalizedActualIssueNos = normalizeStoredIssueNos(record.getActualIssueNos());
+
+            boolean changed = !normalizedIssueNos.equals(defaultString(record.getIssueNos()))
+                    || !normalizedActualIssueNos.equals(defaultString(record.getActualIssueNos()));
+            if (!changed) {
+                continue;
+            }
+
+            DynamicAnalysisRecord updated = new DynamicAnalysisRecord();
+            updated.setId(record.getId());
+            updated.setIssueNos(normalizedIssueNos);
+            updated.setActualIssueNos(normalizedActualIssueNos);
+            dynamicAnalysisRecordMapper.updateById(updated);
+            updatedCount++;
+        }
+
+        return updatedCount;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int deleteExpiredDynamicAnalysisRecords() {
+        String thresholdDate = LocalDate.now()
+                .minusDays(15)
+                .format(DateTimeFormatter.BASIC_ISO_DATE);
+        return dynamicAnalysisRecordMapper.delete(new LambdaQueryWrapper<DynamicAnalysisRecord>()
+                .lt(DynamicAnalysisRecord::getSourceDate, thresholdDate));
+    }
+
+    @Override
     public DynamicAnalysisHistoryCompareDTO compareDynamicAnalysisRecords(DynamicAnalysisHistoryCompareRequestDTO request) {
         if (request == null) {
             throw new IllegalArgumentException("request cannot be null");
@@ -391,7 +431,7 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
                 .in(DynamicAnalysisRecord::getSourceDate, normalizedDates)
                 .eq(DynamicAnalysisRecord::getRankNo, request.getRankNo());
         if (request.getDynamicRule() != null && !request.getDynamicRule().trim().isEmpty()) {
-            compareWrapper.like(DynamicAnalysisRecord::getDynamicRule, request.getDynamicRule().trim());
+            compareWrapper.likeRight(DynamicAnalysisRecord::getDynamicRule, request.getDynamicRule().trim());
         }
         compareWrapper.orderByAsc(DynamicAnalysisRecord::getDynamicRule)
                 .orderByAsc(DynamicAnalysisRecord::getSourceDate);
@@ -710,6 +750,7 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
 
         return missEvents.stream()
                 .map(AnalyzeResultDTO.MissEvent::getDisplayIssueNo)
+                .map(this::extractIssueTail)
                 .collect(Collectors.joining(","));
     }
 
@@ -720,6 +761,7 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
 
         return missEvents.stream()
                 .map(AnalyzeResultDTO.MissEvent::getActualIssueNo)
+                .map(this::extractIssueTail)
                 .collect(Collectors.joining(","));
     }
 
@@ -753,9 +795,9 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
         return resolveIssueDatePrefix(queryDate) + trimmed;
     }
 
-    private String normalizeHistoryIssueNo(String issueNo, String sourceDate) {
+    private List<String> normalizeHistoryIssueNos(String issueNo, String sourceDate) {
         if (issueNo == null || issueNo.trim().isEmpty()) {
-            return null;
+            return Collections.emptyList();
         }
 
         String trimmed = issueNo.trim();
@@ -764,14 +806,65 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
         }
 
         if (trimmed.length() >= 8) {
-            return trimmed;
+            return Collections.singletonList(extractIssueTail(trimmed));
         }
 
-        if (sourceDate == null || sourceDate.trim().isEmpty()) {
-            return trimmed;
+        return Collections.singletonList(trimmed);
+    }
+
+    private LambdaQueryWrapper<DynamicAnalysisRecord> applyIssueNoFilters(
+            LambdaQueryWrapper<DynamicAnalysisRecord> query, List<String> normalizedIssueNos) {
+        query.and(outer -> {
+            for (int i = 0; i < normalizedIssueNos.size(); i++) {
+                String normalizedIssueNo = normalizedIssueNos.get(i);
+                if (i > 0) {
+                    outer.or();
+                }
+                outer.and(nested -> nested
+                        .eq(DynamicAnalysisRecord::getIssueNos, normalizedIssueNo)
+                        .or()
+                        .likeRight(DynamicAnalysisRecord::getIssueNos, normalizedIssueNo + ",")
+                        .or()
+                        .like(DynamicAnalysisRecord::getIssueNos, "," + normalizedIssueNo + ",")
+                        .or()
+                        .likeLeft(DynamicAnalysisRecord::getIssueNos, "," + normalizedIssueNo));
+            }
+        });
+        return query;
+    }
+
+    private String extractIssueTail(String issueNo) {
+        if (issueNo == null) {
+            return "";
         }
 
-        return resolveIssueDatePrefix(sourceDate) + trimmed;
+        String trimmed = issueNo.trim();
+        if (trimmed.length() <= 8) {
+            return trimmed;
+        }
+        return trimmed.substring(8);
+    }
+
+    private String normalizeStoredIssueNos(String issueNos) {
+        if (issueNos == null || issueNos.trim().isEmpty()) {
+            return "";
+        }
+
+        return java.util.Arrays.stream(issueNos.split(","))
+                .map(String::trim)
+                .filter(item -> !item.isEmpty())
+                .map(this::extractIssueTail)
+                .collect(Collectors.joining(","));
+    }
+
+    private String defaultString(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String resolveRecentHistoryStartDate() {
+        return LocalDate.now()
+                .minusDays(9)
+                .format(DateTimeFormatter.BASIC_ISO_DATE);
     }
 
     /**

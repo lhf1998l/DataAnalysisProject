@@ -178,6 +178,26 @@ public class LotteryController {
         }
     }
 
+    @PostMapping("/dynamic-analysis-records/normalize-issue-nos")
+    @Operation(summary = "转化历史分析期号", description = "将动态分析历史表中的完整期号转化为仅保留期号，不带年月日。")
+    public com.lottery.dto.ApiResponse<Integer> normalizeDynamicAnalysisIssueNos() {
+        try {
+            return com.lottery.dto.ApiResponse.success(lotteryService.normalizeDynamicAnalysisIssueNos());
+        } catch (IllegalArgumentException e) {
+            return com.lottery.dto.ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @DeleteMapping("/dynamic-analysis-records/expired")
+    @Operation(summary = "删除15天前历史分析数据", description = "删除动态分析历史表中 source_date 早于当前日期减15天的记录。")
+    public com.lottery.dto.ApiResponse<Integer> deleteExpiredDynamicAnalysisRecords() {
+        try {
+            return com.lottery.dto.ApiResponse.success(lotteryService.deleteExpiredDynamicAnalysisRecords());
+        } catch (IllegalArgumentException e) {
+            return com.lottery.dto.ApiResponse.error(e.getMessage());
+        }
+    }
+
     @PostMapping("/dynamic-analysis-records/compare")
     @Operation(summary = "多日期历史对比", description = "对多个来源日期下的动态规则分析结果进行横向比较。")
     public com.lottery.dto.ApiResponse<DynamicAnalysisHistoryCompareDTO> compareDynamicAnalysisRecords(

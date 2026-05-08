@@ -464,14 +464,14 @@
                       v-model="historyFilters.sourceDate"
                       type="date"
                       value-format="YYYY-MM-DD"
-                      placeholder="请选择日期"
+                      placeholder="默认近10天，可指定日期"
                       clearable
                       size="small"
                     />
                     <span class="label">期号：</span>
                     <el-input
                       v-model.trim="historyFilters.issueNo"
-                      placeholder="输入期号"
+                      placeholder="输入期号尾号"
                       clearable
                       size="small"
                       style="width: 180px"
@@ -491,6 +491,8 @@
                       <el-option v-for="n in 10" :key="n" :label="`第${n}名`" :value="n" />
                     </el-select>
                     <el-button size="small" type="primary" @click="loadHistoryRecords(true)">查询</el-button>
+                    <el-button size="small" type="warning" :loading="historyNormalizeLoading" @click="normalizeHistoryIssueNos">转化历史期号</el-button>
+                    <el-button size="small" type="danger" :loading="historyDeleteLoading" @click="deleteExpiredHistoryRecords">删除15天前数据</el-button>
                     <el-button size="small" @click="resetHistoryFilters">无条件查询</el-button>
                   </div>
                 </div>
@@ -508,6 +510,11 @@
                   </div>
                 </template>
 
+                <el-tabs v-model="historyViewMode" class="history-view-tabs" @tab-change="handleHistoryViewModeChange">
+                  <el-tab-pane label="按日期" name="date" />
+                  <el-tab-pane label="按规则" name="rule" />
+                </el-tabs>
+
                 <div class="table-scroll">
                 <div class="table-toolbar">
                   <el-radio-group v-model="showHistoryPseudoHits" size="small">
@@ -515,12 +522,18 @@
                     <el-radio-button :label="false">隐藏伪命中</el-radio-button>
                   </el-radio-group>
                 </div>
-                <el-table :data="displayedHistoryTableData" border stripe v-loading="historyLoading" style="width: 100%" @sort-change="handleHistorySortChange">
+                <el-table v-if="historyViewMode === 'date'" :data="displayedHistoryTableData" border stripe v-loading="historyLoading" style="width: 100%" @sort-change="handleHistorySortChange">
                   <el-table-column prop="sourceDate" label="数据来源日期" width="140" align="center" />
                   <el-table-column prop="rankNo" label="名次" width="100" align="center">
                     <template #default="{ row }">第{{ row.rankNo }}名</template>
                   </el-table-column>
-                  <el-table-column prop="dynamicRule" label="变动规则" min-width="220" />
+                  <el-table-column prop="dynamicRule" label="变动规则" min-width="220" sortable="custom">
+                    <template #default="{ row }">
+                      <div :class="['history-rule-cell', { 'history-rule-cell-warning': row.hasDuplicateIssueTail }]">
+                        {{ row.dynamicRule }}
+                      </div>
+                    </template>
+                  </el-table-column>
                   <el-table-column prop="totalMissCount" label="连续超过6次未命中的次数" width="220" align="center" sortable="custom" />
                   <el-table-column label="期号" min-width="320">
                     <template #default="{ row }">
@@ -540,9 +553,33 @@
                     </template>
                   </el-table-column>
                 </el-table>
+                <el-table v-else :data="displayedHistoryRuleTableData" border stripe v-loading="historyLoading" style="width: 100%" @sort-change="handleHistorySortChange">
+                  <el-table-column prop="rankNo" label="名次" width="100" align="center">
+                    <template #default="{ row }">第{{ row.rankNo }}名</template>
+                  </el-table-column>
+                  <el-table-column prop="dynamicRule" label="变动规则" min-width="220" sortable="custom" />
+                  <el-table-column prop="totalMissCount" label="连续超过6次未命中的次数" width="220" align="center" sortable="custom" />
+                  <el-table-column label="期号" min-width="320">
+                    <template #default="{ row }">
+                      <div v-if="row.displayedIssuePairs.length" class="issue-list">
+                        <template v-for="pair in row.displayedIssuePairs" :key="`${row.groupKey}-${pair.displayIssueNo}-${pair.actualIssueNo}`">
+                          <el-tooltip
+                            v-if="pair.pseudoHit"
+                            :content="`实际起始期号：${pair.actualIssueNo}`"
+                            placement="top"
+                          >
+                            <el-tag size="small" class="issue-tag pseudo-issue-tag">{{ pair.displayIssueNo }}</el-tag>
+                          </el-tooltip>
+                          <el-tag v-else size="small" class="issue-tag">{{ pair.displayIssueNo }}</el-tag>
+                        </template>
+                      </div>
+                      <span v-else class="empty-text">无</span>
+                    </template>
+                  </el-table-column>
+                </el-table>
                 </div>
 
-                <div class="pagination-area">
+                <div v-if="historyViewMode === 'date'" class="pagination-area">
                   <el-pagination
                     v-model:current-page="historyPagination.page"
                     v-model:page-size="historyPagination.size"
@@ -747,9 +784,14 @@ const historyFilters = ref({
   rankNo: null,
 })
 const historyTableData = ref([])
+const historyRuleTableData = ref([])
 const historyLoading = ref(false)
+const historyNormalizeLoading = ref(false)
+const historyDeleteLoading = ref(false)
 const historyPagination = ref({ page: 1, size: 20, total: 0 })
 const historySortOrder = ref('')
+const historyRuleSortOrder = ref('')
+const historyViewMode = ref('date')
 const showHistoryPseudoHits = ref(true)
 
 const compareFilters = ref({
@@ -815,8 +857,8 @@ const displayedDynamicRules = computed(() => {
   return rules
 })
 
-const displayedHistoryTableData = computed(() =>
-  historyTableData.value.map((row) => {
+const displayedHistoryTableData = computed(() => {
+  const rows = historyTableData.value.map((row) => {
     const displayedIssuePairs = filterIssuePairs(row.issueNos, row.actualIssueNos, showHistoryPseudoHits.value)
 
     return {
@@ -825,7 +867,55 @@ const displayedHistoryTableData = computed(() =>
       displayedIssuePairs,
     }
   })
-)
+
+  if (historyRuleSortOrder.value === 'ascending') {
+    rows.sort((a, b) => (a.dynamicRule || '').localeCompare(b.dynamicRule || ''))
+  } else if (historyRuleSortOrder.value === 'descending') {
+    rows.sort((a, b) => (b.dynamicRule || '').localeCompare(a.dynamicRule || ''))
+  }
+
+  return rows
+})
+
+const displayedHistoryRuleTableData = computed(() => {
+  const rows = historyRuleTableData.value.map((row) => {
+    const displayedIssuePairs = filterIssuePairs(row.issueNos, row.actualIssueNos, showHistoryPseudoHits.value)
+    const issueTailSet = new Set()
+    let hasDuplicateIssueTail = false
+
+    displayedIssuePairs.forEach((pair) => {
+      const issueNo = pair.actualIssueNo || pair.displayIssueNo || ''
+      const issueTail = issueNo.length > 8 ? issueNo.slice(8) : issueNo
+      if (!issueTail) {
+        return
+      }
+      if (issueTailSet.has(issueTail)) {
+        hasDuplicateIssueTail = true
+        return
+      }
+      issueTailSet.add(issueTail)
+    })
+
+    return {
+      ...row,
+      totalMissCount: displayedIssuePairs.length,
+      displayedIssuePairs,
+      hasDuplicateIssueTail,
+    }
+  })
+
+  if (historyRuleSortOrder.value === 'ascending') {
+    rows.sort((a, b) => (a.dynamicRule || '').localeCompare(b.dynamicRule || ''))
+  } else if (historyRuleSortOrder.value === 'descending') {
+    rows.sort((a, b) => (b.dynamicRule || '').localeCompare(a.dynamicRule || ''))
+  } else if (historySortOrder.value === 'ascending') {
+    rows.sort((a, b) => (a.totalMissCount ?? 0) - (b.totalMissCount ?? 0))
+  } else if (historySortOrder.value === 'descending') {
+    rows.sort((a, b) => (b.totalMissCount ?? 0) - (a.totalMissCount ?? 0))
+  }
+
+  return rows
+})
 
 const displayedRuleCompares = computed(() => {
   const ruleCompares = (historyCompareResult.value?.ruleCompares || []).map((ruleCompare) => {
@@ -882,13 +972,28 @@ const resetDynamicRuleSearch = () => {
 const handleHistorySortChange = ({ prop, order }) => {
   if (prop === 'totalMissCount') {
     historySortOrder.value = order || ''
-    loadHistoryRecords(true)
+    if (historyViewMode.value === 'date') {
+      loadHistoryRecords(true)
+    }
+    return
   }
+
+  if (prop === 'dynamicRule') {
+    historyRuleSortOrder.value = order || ''
+  }
+}
+
+const handleHistoryViewModeChange = (mode) => {
+  historyViewMode.value = mode
+  historySortOrder.value = ''
+  historyRuleSortOrder.value = ''
+  loadHistoryRecords(true)
 }
 
 const resetHistoryFilters = () => {
   historyFilters.value = { sourceDate: '', issueNo: '', dynamicRule: '', rankNo: null }
   historySortOrder.value = ''
+  historyRuleSortOrder.value = ''
   loadHistoryRecords(true)
 }
 
@@ -1194,6 +1299,85 @@ const loadDynamicRules = async () => {
 }
 
 // 加载动态规则历史分析记录，供历史页分页展示。
+const buildHistoryRuleGroups = (records) => {
+  const grouped = new Map()
+
+  ;(records || []).forEach((row) => {
+    const groupKey = `${row.rankNo || ''}__${row.dynamicRule || ''}`
+    const issuePairs = buildIssuePairs(row.issueNos, row.actualIssueNos)
+    const existing = grouped.get(groupKey) || {
+      groupKey,
+      rankNo: row.rankNo,
+      dynamicRule: row.dynamicRule,
+      issuePairMap: new Map(),
+    }
+
+    issuePairs.forEach((pair) => {
+      const pairKey = `${pair.displayIssueNo}__${pair.actualIssueNo}`
+      if (!existing.issuePairMap.has(pairKey)) {
+        existing.issuePairMap.set(pairKey, pair)
+      }
+    })
+
+    grouped.set(groupKey, existing)
+  })
+
+  return Array.from(grouped.values()).map((group) => {
+    const pairs = Array.from(group.issuePairMap.values()).sort((a, b) => a.actualIssueNo.localeCompare(b.actualIssueNo))
+
+    return {
+      groupKey: group.groupKey,
+      rankNo: group.rankNo,
+      dynamicRule: group.dynamicRule,
+      issueNos: pairs.map(item => item.displayIssueNo).join(','),
+      actualIssueNos: pairs.map(item => item.actualIssueNo).join(','),
+    }
+  })
+}
+
+const hasHistoryRuleQueryCondition = () => Boolean(
+  historyFilters.value.sourceDate
+  || historyFilters.value.issueNo?.trim()
+  || historyFilters.value.dynamicRule?.trim()
+  || historyFilters.value.rankNo
+)
+
+const loadHistoryRuleGroups = async () => {
+  if (!hasHistoryRuleQueryCondition()) {
+    historyRuleTableData.value = []
+    return
+  }
+
+  const aggregatedRecords = []
+  let page = 1
+  let pages = 1
+
+  do {
+    const resp = await axios.get('/api/lottery/dynamic-analysis-records', {
+      params: {
+        page,
+        size: 500,
+        sourceDate: historyFilters.value.sourceDate || undefined,
+        issueNo: historyFilters.value.issueNo || undefined,
+        dynamicRule: historyFilters.value.dynamicRule || undefined,
+        rankNo: historyFilters.value.rankNo || undefined,
+        sortOrder: historySortOrder.value || undefined,
+      },
+    })
+
+    if (resp.data.code !== 200) {
+      throw new Error(resp.data.message || '历史记录加载失败')
+    }
+
+    const pageData = resp.data.data || {}
+    aggregatedRecords.push(...(pageData.records || []))
+    page = (pageData.current || page) + 1
+    pages = pageData.pages || 1
+  } while (page <= pages)
+
+  historyRuleTableData.value = buildHistoryRuleGroups(aggregatedRecords)
+}
+
 const loadHistoryRecords = async (resetPage = false) => {
   if (resetPage) {
     historyPagination.value.page = 1
@@ -1201,6 +1385,14 @@ const loadHistoryRecords = async (resetPage = false) => {
 
   historyLoading.value = true
   try {
+    if (historyViewMode.value === 'rule') {
+      await loadHistoryRuleGroups()
+      historyTableData.value = []
+      historyPagination.value.total = historyRuleTableData.value.length
+      showHistoryPseudoHits.value = true
+      return
+    }
+
     const resp = await axios.get('/api/lottery/dynamic-analysis-records', {
       params: {
         page: historyPagination.value.page,
@@ -1214,6 +1406,7 @@ const loadHistoryRecords = async (resetPage = false) => {
     })
     if (resp.data.code === 200) {
       historyTableData.value = resp.data.data.records
+      historyRuleTableData.value = []
       historyPagination.value.total = resp.data.data.total
       historyPagination.value.page = resp.data.data.current
       historyPagination.value.size = resp.data.data.size
@@ -1226,6 +1419,48 @@ const loadHistoryRecords = async (resetPage = false) => {
   } finally {
     historyLoading.value = false
   }
+}
+
+const normalizeHistoryIssueNos = async () => {
+  historyNormalizeLoading.value = true
+  try {
+    const resp = await axios.post('/api/lottery/dynamic-analysis-records/normalize-issue-nos')
+    if (resp.data.code === 200) {
+      const updatedCount = resp.data.data ?? 0
+      ElMessage.success(`历史期号转化完成，共更新 ${updatedCount} 条记录`)
+      loadHistoryRecords(true)
+    } else {
+      ElMessage.error(resp.data.message || '历史期号转化失败')
+    }
+  } catch {
+    ElMessage.error('历史期号转化失败')
+  } finally {
+    historyNormalizeLoading.value = false
+  }
+}
+
+const deleteExpiredHistoryRecords = async () => {
+  ElMessageBox.confirm('确定要删除15天前的历史分析数据吗？此操作不可恢复。', '警告', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    type: 'warning',
+  }).then(async () => {
+    historyDeleteLoading.value = true
+    try {
+      const resp = await axios.delete('/api/lottery/dynamic-analysis-records/expired')
+      if (resp.data.code === 200) {
+        const deletedCount = resp.data.data ?? 0
+        ElMessage.success(`删除完成，共删除 ${deletedCount} 条历史记录`)
+        loadHistoryRecords(true)
+      } else {
+        ElMessage.error(resp.data.message || '删除历史分析数据失败')
+      }
+    } catch {
+      ElMessage.error('删除历史分析数据失败')
+    } finally {
+      historyDeleteLoading.value = false
+    }
+  }).catch(() => {})
 }
 
 // 对多个日期的历史分析结果做横向比较。
@@ -1515,6 +1750,16 @@ onBeforeUnmount(() => {
 .issue-tag {
   margin-right: 4px;
   margin-bottom: 4px;
+}
+
+.history-rule-cell {
+  display: block;
+  margin: -12px;
+  padding: 12px;
+}
+
+.history-rule-cell-warning {
+  background-color: #fff3bf;
 }
 
 .pseudo-issue-tag {

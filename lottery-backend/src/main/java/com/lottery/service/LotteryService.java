@@ -68,6 +68,10 @@ public interface LotteryService extends IService<LotteryRecord> {
     PageResultDTO<DynamicAnalysisRecord> listDynamicAnalysisRecords(
             int pageNum, int pageSize, String sourceDate, String issueNo, String dynamicRule, Integer rankNo, String sortOrder);
 
+    int normalizeDynamicAnalysisIssueNos();
+
+    int deleteExpiredDynamicAnalysisRecords();
+
     /**
      * 比较多个日期的动态分析结果。
      */

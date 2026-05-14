@@ -70,7 +70,7 @@
                     <el-upload
                       :action="importUrl"
                       name="file"
-                      accept=".xls"
+                      accept=".xls,.xlsx"
                       :show-file-list="false"
                       :before-upload="beforeUpload"
                       :on-success="onUploadSuccess"
@@ -1151,7 +1151,7 @@ const handleUpdateRecord = async () => {
 }
 
 const validateXlsFile = (file, loadingRef) => {
-  const isXls = file.name.toLowerCase().endsWith('.xls')
+  const isXls = file.name.toLowerCase().endsWith('.xls') || file.name.toLowerCase().endsWith('.xlsx')
   if (!isXls) {
     ElMessage.error('只能上传 .xls 格式文件')
     return false

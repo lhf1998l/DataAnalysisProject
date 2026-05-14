@@ -22,27 +22,37 @@ import com.lottery.mapper.LotteryMapper;
 import com.lottery.service.LotteryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.openxml4j.exceptions.OLE2NotOfficeXmlFileException;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import org.apache.poi.poifs.filesystem.OfficeXmlFileException;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 @Slf4j
 @Service
@@ -73,7 +83,7 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
         int skippedCount = 0;
         List<String> errorMessages = new ArrayList<>();
 
-        try (InputStream is = file.getInputStream(); Workbook workbook = new HSSFWorkbook(is)) {
+        try (Workbook workbook = openWorkbook(file)) {
             Sheet sheet = workbook.getSheetAt(0);
             log.info("Sheet name: {}, Rows: {}", sheet.getSheetName(), sheet.getLastRowNum());
 
@@ -153,7 +163,7 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
         if (normalizedStartIssueNo != null) {
             List<LotteryRecord> records = lotteryMapper.selectList(new LambdaQueryWrapper<LotteryRecord>()
                     .likeRight(LotteryRecord::getIssueNo, resolveIssueDatePrefix(queryDate))
-                    .ge(LotteryRecord::getIssueNo, normalizedStartIssueNo)
+                    .apply("CAST(issue_no AS UNSIGNED) >= {0}", Long.parseLong(normalizedStartIssueNo))
                     .last("ORDER BY CAST(issue_no AS UNSIGNED) ASC LIMIT 20"));
 
             Page<LotteryRecord> page = new Page<>(1, 20, false);
@@ -583,6 +593,87 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
         return new AnalysisResult(totalMissEvents, missEvents);
     }
 
+    private Workbook openWorkbook(MultipartFile file) throws Exception {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("鏂囦欢涓嶈兘涓虹┖");
+        }
+
+        byte[] bytes = file.getBytes();
+        try (ByteArrayInputStream inputStream = new ByteArrayInputStream(bytes)) {
+            return WorkbookFactory.create(inputStream);
+        } catch (OLE2NotOfficeXmlFileException | OfficeXmlFileException e) {
+            throw e;
+        } catch (Exception e) {
+            if (looksLikeExcel2003Xml(bytes)) {
+                return buildWorkbookFromExcel2003Xml(bytes);
+            }
+            throw e;
+        }
+    }
+
+    private boolean looksLikeExcel2003Xml(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            return false;
+        }
+        String header = new String(bytes, 0, Math.min(bytes.length, 512), java.nio.charset.StandardCharsets.UTF_8)
+                .toLowerCase(Locale.ROOT);
+        return header.contains("<?xml") && header.contains("spreadsheet");
+    }
+
+    private Workbook buildWorkbookFromExcel2003Xml(byte[] bytes) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        Document document;
+        try (ByteArrayInputStream inputStream = new ByteArrayInputStream(bytes)) {
+            document = factory.newDocumentBuilder().parse(inputStream);
+        }
+
+        org.apache.poi.xssf.usermodel.XSSFWorkbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+        org.apache.poi.xssf.usermodel.XSSFSheet sheet = workbook.createSheet("Sheet1");
+        NodeList rowNodes = document.getElementsByTagNameNS("*", "Row");
+        int sheetRowIndex = 0;
+        for (int i = 0; i < rowNodes.getLength(); i++) {
+            Node rowNode = rowNodes.item(i);
+            if (!(rowNode instanceof Element)) {
+                continue;
+            }
+
+            org.apache.poi.xssf.usermodel.XSSFRow sheetRow = sheet.createRow(sheetRowIndex++);
+            NodeList childNodes = rowNode.getChildNodes();
+            int cellIndex = 0;
+            for (int childIndex = 0; childIndex < childNodes.getLength(); childIndex++) {
+                Node childNode = childNodes.item(childIndex);
+                if (!(childNode instanceof Element) || !"Cell".equals(childNode.getLocalName())) {
+                    continue;
+                }
+
+                Element cellElement = (Element) childNode;
+                String indexAttr = cellElement.getAttributeNS("urn:schemas-microsoft-com:office:spreadsheet", "Index");
+                if (indexAttr != null && !indexAttr.trim().isEmpty()) {
+                    cellIndex = Math.max(cellIndex, Integer.parseInt(indexAttr.trim()) - 1);
+                }
+
+                String cellValue = extractExcelXmlCellValue(cellElement);
+                if (!cellValue.trim().isEmpty()) {
+                    sheetRow.createCell(cellIndex).setCellValue(cellValue);
+                }
+                cellIndex++;
+            }
+        }
+        return workbook;
+    }
+
+    private String extractExcelXmlCellValue(Element cellElement) {
+        NodeList childNodes = cellElement.getChildNodes();
+        for (int i = 0; i < childNodes.getLength(); i++) {
+            Node childNode = childNodes.item(i);
+            if (childNode instanceof Element && "Data".equals(childNode.getLocalName())) {
+                return childNode.getTextContent() == null ? "" : childNode.getTextContent().trim();
+            }
+        }
+        return "";
+    }
+
     /**
      * 从 XLS 文件中提取动态规则模式。
      */
@@ -592,7 +683,7 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
         }
 
         List<boolean[]> rulePatterns = new ArrayList<>();
-        try (InputStream is = file.getInputStream(); Workbook workbook = new HSSFWorkbook(is)) {
+        try (Workbook workbook = openWorkbook(file)) {
             Sheet sheet = workbook.getSheetAt(0);
 
             for (int rowIndex = sheet.getFirstRowNum(); rowIndex <= sheet.getLastRowNum(); rowIndex++) {

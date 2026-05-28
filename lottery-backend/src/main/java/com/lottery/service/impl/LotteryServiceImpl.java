@@ -340,7 +340,7 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
 
     @Override
     public PageResultDTO<DynamicAnalysisRecord> listDynamicAnalysisRecords(
-            int pageNum, int pageSize, String sourceDate, String issueNo, String dynamicRule, Integer rankNo, String sortOrder) {
+            int pageNum, int pageSize, String sourceDate, String issueNo, String dynamicRule, Integer rankNo, String sortOrder, boolean showPseudoHits) {
         Page<DynamicAnalysisRecord> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<DynamicAnalysisRecord> wrapper = Wrappers.lambdaQuery();
 
@@ -374,12 +374,28 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
                 .orderByAsc(DynamicAnalysisRecord::getId);
 
         Page<DynamicAnalysisRecord> result = dynamicAnalysisRecordMapper.selectPage(page, wrapper);
+
+        // 只在搜索期号且隐藏伪命中时过滤
+        List<DynamicAnalysisRecord> records = result.getRecords();
+        if (!showPseudoHits && issueNo != null && !issueNo.trim().isEmpty()) {
+            String searchIssueNo = issueNo.trim();
+            records = records.stream()
+                    .filter(record -> {
+                        String actualIssueNos = record.getActualIssueNos();
+                        if (actualIssueNos == null || actualIssueNos.isEmpty()) {
+                            return false;
+                        }
+                        return actualIssueNos.contains(searchIssueNo);
+                    })
+                    .collect(java.util.stream.Collectors.toList());
+        }
+
         return new PageResultDTO<>(
                 result.getCurrent(),
                 result.getSize(),
                 result.getTotal(),
                 result.getPages(),
-                result.getRecords()
+                records
         );
     }
 

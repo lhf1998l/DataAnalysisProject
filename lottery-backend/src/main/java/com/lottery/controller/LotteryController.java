@@ -168,10 +168,11 @@ public class LotteryController {
             @Parameter(description = "期号，支持完整期号或日期后缀") @RequestParam(value = "issueNo", required = false) String issueNo,
             @Parameter(description = "动态规则关键字") @RequestParam(value = "dynamicRule", required = false) String dynamicRule,
             @Parameter(description = "名次，取值 1-10") @RequestParam(value = "rankNo", required = false) Integer rankNo,
-            @Parameter(description = "未命中次数排序，ascending 或 descending") @RequestParam(value = "sortOrder", required = false) String sortOrder) {
+            @Parameter(description = "未命中次数排序，ascending 或 descending") @RequestParam(value = "sortOrder", required = false) String sortOrder,
+            @Parameter(description = "是否显示伪命中，默认 true") @RequestParam(value = "showPseudoHits", defaultValue = "true") boolean showPseudoHits) {
         try {
             return com.lottery.dto.ApiResponse.success(
-                    lotteryService.listDynamicAnalysisRecords(page, size, sourceDate, issueNo, dynamicRule, rankNo, sortOrder)
+                    lotteryService.listDynamicAnalysisRecords(page, size, sourceDate, issueNo, dynamicRule, rankNo, sortOrder, showPseudoHits)
             );
         } catch (IllegalArgumentException e) {
             return com.lottery.dto.ApiResponse.error(e.getMessage());

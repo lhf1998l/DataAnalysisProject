@@ -1028,6 +1028,10 @@ watch(showAddDialog, (visible) => {
   }
 })
 
+watch(showHistoryPseudoHits, () => {
+  loadHistoryRecords(true)
+})
+
 const getRuleContent = (ruleNo) => updatedRuleContentMap[ruleNo] || ruleContentMap[ruleNo] || '-'
 
 const filterPseudoMissEvents = (missEvents, showPseudo) => {
@@ -1313,9 +1317,24 @@ const buildHistoryRuleGroups = (records) => {
     }
 
     issuePairs.forEach((pair) => {
-      const pairKey = `${pair.displayIssueNo}__${pair.actualIssueNo}`
+      // 使用 sourceDate + actualIssueNo 作为去重的key，确保不同日期的相同期号都会被保留
+      const pairKey = `${row.sourceDate || ''}__${pair.actualIssueNo}`
       if (!existing.issuePairMap.has(pairKey)) {
-        existing.issuePairMap.set(pairKey, pair)
+        // 如果 actualIssueNo 不包含年月日，则添加 sourceDate 作为前缀
+        let displayIssueNo = pair.displayIssueNo
+        let actualIssueNo = pair.actualIssueNo
+
+        if (row.sourceDate && actualIssueNo && actualIssueNo.length <= 8) {
+          // 期号长度 <= 8，说明没有年月日，需要添加
+          actualIssueNo = row.sourceDate + actualIssueNo
+          displayIssueNo = row.sourceDate + displayIssueNo
+        }
+
+        existing.issuePairMap.set(pairKey, {
+          displayIssueNo,
+          actualIssueNo,
+          pseudoHit: displayIssueNo !== actualIssueNo,
+        })
       }
     })
 
@@ -1362,6 +1381,7 @@ const loadHistoryRuleGroups = async () => {
         dynamicRule: historyFilters.value.dynamicRule || undefined,
         rankNo: historyFilters.value.rankNo || undefined,
         sortOrder: historySortOrder.value || undefined,
+        showPseudoHits: true,
       },
     })
 
@@ -1389,7 +1409,6 @@ const loadHistoryRecords = async (resetPage = false) => {
       await loadHistoryRuleGroups()
       historyTableData.value = []
       historyPagination.value.total = historyRuleTableData.value.length
-      showHistoryPseudoHits.value = true
       return
     }
 
@@ -1402,6 +1421,7 @@ const loadHistoryRecords = async (resetPage = false) => {
         dynamicRule: historyFilters.value.dynamicRule || undefined,
         rankNo: historyFilters.value.rankNo || undefined,
         sortOrder: historySortOrder.value || undefined,
+        showPseudoHits: showHistoryPseudoHits.value,
       },
     })
     if (resp.data.code === 200) {
@@ -1410,7 +1430,6 @@ const loadHistoryRecords = async (resetPage = false) => {
       historyPagination.value.total = resp.data.data.total
       historyPagination.value.page = resp.data.data.current
       historyPagination.value.size = resp.data.data.size
-      showHistoryPseudoHits.value = true
     } else {
       ElMessage.error(resp.data.message || '历史记录加载失败')
     }

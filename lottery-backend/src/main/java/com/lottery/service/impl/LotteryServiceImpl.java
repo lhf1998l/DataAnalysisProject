@@ -459,6 +459,10 @@ public class LotteryServiceImpl extends ServiceImpl<LotteryMapper, LotteryRecord
         if (request.getDynamicRule() != null && !request.getDynamicRule().trim().isEmpty()) {
             compareWrapper.likeRight(DynamicAnalysisRecord::getDynamicRule, request.getDynamicRule().trim());
         }
+        if (request.getIssueNo() != null && !request.getIssueNo().trim().isEmpty()) {
+            List<String> normalizedIssueNos = normalizeHistoryIssueNos(request.getIssueNo(), null);
+            compareWrapper.and(query -> applyIssueNoFilters(query, normalizedIssueNos));
+        }
         compareWrapper.orderByAsc(DynamicAnalysisRecord::getDynamicRule)
                 .orderByAsc(DynamicAnalysisRecord::getSourceDate);
 

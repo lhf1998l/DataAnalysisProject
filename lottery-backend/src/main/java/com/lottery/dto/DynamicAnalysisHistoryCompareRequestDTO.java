@@ -16,4 +16,7 @@ public class DynamicAnalysisHistoryCompareRequestDTO {
 
     @Schema(description = "按规则关键字过滤", example = "小大大小")
     private String dynamicRule;
+
+    @Schema(description = "按期号过滤，支持完整期号或期号尾号", example = "891")
+    private String issueNo;
 }

@@ -464,7 +464,7 @@
                       v-model="historyFilters.sourceDate"
                       type="date"
                       value-format="YYYY-MM-DD"
-                      placeholder="默认近10天，可指定日期"
+                      placeholder="默认近15天，可指定日期"
                       clearable
                       size="small"
                     />
@@ -631,6 +631,15 @@
                       style="width: 220px"
                       @keyup.enter="compareHistoryRecords"
                     />
+                    <span class="label">期号：</span>
+                    <el-input
+                      v-model.trim="compareFilters.issueNo"
+                      placeholder="输入期号尾号"
+                      clearable
+                      size="small"
+                      style="width: 180px"
+                      @keyup.enter="compareHistoryRecords"
+                    />
                     <el-button type="primary" size="small" :loading="compareLoading" @click="compareHistoryRecords">比较分析</el-button>
                     <el-button size="small" @click="resetCompareFilters">重置</el-button>
                   </div>
@@ -788,7 +797,7 @@ const historyRuleTableData = ref([])
 const historyLoading = ref(false)
 const historyNormalizeLoading = ref(false)
 const historyDeleteLoading = ref(false)
-const historyPagination = ref({ page: 1, size: 20, total: 0 })
+const historyPagination = ref({ page: 1, size: 50, total: 0 })
 const historySortOrder = ref('')
 const historyRuleSortOrder = ref('')
 const historyViewMode = ref('date')
@@ -798,6 +807,7 @@ const compareFilters = ref({
   sourceDates: [],
   rankNo: null,
   dynamicRule: '',
+  issueNo: '',
 })
 const compareLoading = ref(false)
 const historyCompareResult = ref(null)
@@ -998,7 +1008,7 @@ const resetHistoryFilters = () => {
 }
 
 const resetCompareFilters = () => {
-  compareFilters.value = { sourceDates: [], rankNo: null, dynamicRule: '' }
+  compareFilters.value = { sourceDates: [], rankNo: null, dynamicRule: '', issueNo: '' }
   historyCompareResult.value = null
   compareSortOrder.value = ''
 }
@@ -1499,6 +1509,7 @@ const compareHistoryRecords = async () => {
       sourceDates: compareFilters.value.sourceDates,
       rankNo: compareFilters.value.rankNo,
       dynamicRule: compareFilters.value.dynamicRule || undefined,
+      issueNo: compareFilters.value.issueNo || undefined,
     })
     if (resp.data.code === 200) {
       historyCompareResult.value = resp.data.data

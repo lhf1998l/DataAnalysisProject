@@ -1,3 +1,22 @@
+CREATE TABLE IF NOT EXISTS lottery_record (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    issue_no VARCHAR(32) NOT NULL,
+    ball_1 INT NOT NULL,
+    ball_2 INT NOT NULL,
+    ball_3 INT NOT NULL,
+    ball_4 INT NOT NULL,
+    ball_5 INT NOT NULL,
+    ball_6 INT NOT NULL,
+    ball_7 INT NOT NULL,
+    ball_8 INT NOT NULL,
+    ball_9 INT NOT NULL,
+    ball_10 INT NOT NULL,
+    raw_numbers VARCHAR(255) NOT NULL,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_lottery_issue_no (issue_no)
+);
+
 CREATE TABLE IF NOT EXISTS dynamic_rule (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     rule_no INT NOT NULL,
